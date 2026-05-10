@@ -47,7 +47,7 @@ export const handler: Handler = async (event, context) => {
       const body: ItineraryRequest = JSON.parse(event.body || '{}');
       
       // Validate input
-      if (!body.city || body.budget <= 0 || body.days <= 0 || body.travelers <= 0) {
+      if (!body.city || body.budget <= 0 || body.days <= 0 || body.travelers <= 0 || !body.interests || body.interests.length === 0) {
         return {
           statusCode: 400,
           headers: {
@@ -55,7 +55,7 @@ export const handler: Handler = async (event, context) => {
             'Access-Control-Allow-Origin': '*',
           },
           body: JSON.stringify({
-            error: 'Invalid input parameters'
+            error: 'Invalid input parameters. Please provide city, budget, days, travelers, and at least one interest.'
           }),
         };
       }
@@ -63,7 +63,7 @@ export const handler: Handler = async (event, context) => {
       // Generate itinerary using Groq API
       const prompt = createItineraryPrompt(body);
       const apiResponse = await callGroqAPI(prompt);
-      const itinerary = parseItineraryResponse(apiResponse, body);
+      const itinerary = await parseItineraryResponse(apiResponse, body);
       
       return {
         statusCode: 200,
@@ -107,35 +107,68 @@ Accommodation preference: ${accommodation}
 Transportation preference: ${transportation}
 Interests: ${interests.join(', ')}
 
+IMPORTANT: You must provide REAL, SPECIFIC places, restaurants, and activities that actually exist in ${city}. Do not use generic placeholders like "local restaurant" or "city attraction". Research and provide actual names of:
+
+- Real restaurants with specific cuisines
+- Actual tourist attractions and landmarks
+- Specific neighborhoods and areas
+- Real hotels/accommodations in that price range
+- Authentic local experiences
+
+CRITICAL VARIETY REQUIREMENT: Each day must be COMPLETELY UNIQUE with different:
+- Different restaurants for each meal (never repeat the same restaurant)
+- Different activities and attractions (never visit the same place twice)
+- Different neighborhoods/areas to explore
+- Varied experiences based on the time of day
+- Mix of popular tourist spots and hidden local gems
+
 Please provide a comprehensive itinerary that includes:
 
-1. A brief summary of the trip
+1. A brief summary of the trip highlighting real places in ${city}
 2. Daily breakdown for each of the ${days} days including:
-   - 3-4 main activities per day
-   - Meal suggestions (breakfast, lunch, dinner)
-   - Accommodation details
-   - Estimated daily cost in INR
-3. 5-7 practical travel tips specific to ${city}
+   - 3-4 SPECIFIC activities with real place names (e.g., "Visit Taj Mahal", "Explore Connaught Place", not "visit local attractions")
+   - SPECIFIC meal suggestions with DIFFERENT real restaurant names for each day (e.g., "Lunch at Karim's in Old Delhi", "Dinner at Punjab Grill in Connaught Place", "Breakfast at The Coffee House")
+   - Specific accommodation details with real hotel names or areas
+   - Realistic estimated daily cost in INR
+3. 5-7 practical travel tips specific to ${city} considering ${transportation} transportation
 4. Emergency contact information for ${city}
 
-Make sure the total cost fits within the ₹${budget} budget. Focus on authentic local experiences and practical information.
+Make sure the total cost fits within the ₹${budget} INR budget. Focus on authentic local experiences and practical information that matches the traveler's preferences for ${accommodation} accommodation, ${transportation} transportation, and interests in ${interests.join(', ')}.
+
+CRITICAL: Use REAL PLACE NAMES, RESTAURANT NAMES, and SPECIFIC LOCATIONS. For example:
+- Instead of "visit a museum": "Visit the National Museum" or "Explore the British Museum"
+- Instead of "eat at a local restaurant": "Have dinner at Punjab Grill" or "Try street food at Chandni Chowk"
+- Instead of "stay in a hotel": "Stay at The Oberoi" or "Check into Hotel Taj Palace"
+
+VARIETY EXAMPLES FOR ${city}:
+Day 1: Focus on historical sites and Old Delhi experiences
+Day 2: Modern areas, shopping districts, and contemporary attractions  
+Day 3: Nature parks, gardens, and outdoor activities
+Day 4+: Mix of cultural experiences, local markets, and unique neighborhoods
 
 IMPORTANT: Respond ONLY with a valid JSON object in this exact format:
 {
   "city": "${city}",
-  "summary": "brief summary here",
+  "summary": "brief summary here mentioning real places",
   "totalBudget": ${budget},
   "days": [
     {
       "day": 1,
-      "activities": ["activity 1", "activity 2", "activity 3"],
-      "meals": ["breakfast suggestion", "lunch suggestion", "dinner suggestion"],
-      "accommodation": "accommodation details",
-      "estimatedCost": 100
+      "activities": ["Visit Taj Mahal and explore the surrounding gardens", "Take a rickshaw ride through Old Delhi", "Watch the sunset at India Gate"],
+      "meals": ["Breakfast at hotel", "Lunch at Karim's in Old Delhi", "Dinner at Punjab Grill in Connaught Place"],
+      "accommodation": "Stay at The Oberoi in central Delhi",
+      "estimatedCost": 5000
+    },
+    {
+      "day": 2,
+      "activities": ["Explore Humayun's Tomb and gardens", "Visit Lodhi Gardens for a peaceful walk", "Shop at local markets in Hauz Khas"],
+      "meals": ["Breakfast at The Coffee House", "Lunch at The Spice Route in Aerocity", "Dinner at Indian Accent in Lodhi Road"],
+      "accommodation": "Continue stay at The Oberoi",
+      "estimatedCost": 4500
     }
   ],
-  "tips": ["tip 1", "tip 2", "tip 3"],
-  "emergencyContacts": ["contact 1", "contact 2"]
+  "tips": ["Use Delhi Metro for efficient travel", "Carry cash for street vendors", "Visit during cooler months"],
+  "emergencyContacts": ["Police: 100", "Tourist Police: Contact hotel", "Medical: 102"]
 }
 
 Do not include any other text, explanations, or formatting outside of this JSON structure.`;
@@ -181,7 +214,7 @@ async function callGroqAPI(prompt: string): Promise<any> {
   }
 }
 
-function parseItineraryResponse(apiResponse: string, request: ItineraryRequest): ItineraryResponse {
+async function parseItineraryResponse(apiResponse: string, request: ItineraryRequest): Promise<ItineraryResponse> {
   try {
     console.log('Raw API response:', apiResponse.substring(0, 200) + '...');
     
@@ -203,11 +236,11 @@ function parseItineraryResponse(apiResponse: string, request: ItineraryRequest):
     }
     
     // If no JSON found, create a structured response from text
-    return createStructuredItinerary(apiResponse, request);
+    return await createStructuredItinerary(apiResponse, request);
   } catch (error) {
     console.error('Failed to parse API response:', error);
     // Fallback to creating a structured response
-    return createStructuredItinerary(apiResponse, request);
+    return await createStructuredItinerary(apiResponse, request);
   }
 }
 
@@ -224,17 +257,8 @@ function structureItinerary(parsed: any, request: ItineraryRequest): ItineraryRe
   };
 }
 
-function createStructuredItinerary(apiResponse: string, request: ItineraryRequest): ItineraryResponse {
-  const { city, budget, days, interests, accommodation, transportation } = request;
-  
-  return {
-    city,
-    summary: `A personalized ${days}-day journey through ${city} featuring ${interests.join(', ')} experiences. Your ${accommodation} accommodation and ${transportation} transportation preferences have been considered to create the perfect adventure within your ₹${budget} budget.`,
-    totalBudget: budget,
-    days: generateDefaultDays(days, city),
-    tips: generateDefaultTips(city),
-    emergencyContacts: generateDefaultContacts(city)
-  };
+async function createStructuredItinerary(apiResponse: string, request: ItineraryRequest): Promise<ItineraryResponse> {
+  return await generateGoogleItinerary(request);
 }
 
 function generateDefaultDays(days: number, city: string): ItineraryDay[] {
@@ -267,38 +291,19 @@ function generateDefaultContacts(city: string): string[] {
   ];
 }
 
-async function generateMockItinerary(request: ItineraryRequest): Promise<ItineraryResponse> {
-  const { city, budget, days, travelers, interests, accommodation, transportation } = request;
-  
-  // Budget is already in INR - no conversion needed
-  const budgetInINR = budget;
-  
-  // Calculate realistic daily budget based on user's actual budget
-  const maxDailyBudget = Math.floor(budgetInINR / days);
-  
-  // Generate accommodation-specific daily costs that fit within budget
-  const accommodationMultipliers = {
-    budget: 0.3,     // 30% of daily budget (very budget-friendly)
-    hotel: 0.4,      // 40% of daily budget (moderate)
-    luxury: 0.5,     // 50% of daily budget (luxury but controlled)
-    apartment: 0.35, // 35% of daily budget
-    camping: 0.2     // 20% of daily budget (very cheap)
-  };
-  
-  const multiplier = accommodationMultipliers[accommodation as keyof typeof accommodationMultipliers] || 0.4;
-  const adjustedDailyCost = Math.min(maxDailyBudget * multiplier, maxDailyBudget);
-  
-  // Ensure total cost doesn't exceed budget - be very strict
-  const totalCost = adjustedDailyCost * days;
-  
-  // Final safety check - ensure we never exceed user's budget
-  const safetyBudget = Math.min(totalCost, budgetInINR);
-  
+async function generateGoogleItinerary(request: ItineraryRequest): Promise<ItineraryResponse> {
+  const { city, budget, days, interests, accommodation, transportation } = request;
+  const cityPlaces = await getCitySpecificPlaces(city, interests);
+
+  if (!cityPlaces.attractions.length || !cityPlaces.restaurants.length) {
+    throw new Error(`Unable to generate a real itinerary for ${city} because Google Places returned insufficient data.`);
+  }
+
   return {
     city,
-    summary: `Experience the magic of ${city} with this carefully crafted ${days}-day itinerary! Discover ${interests.join(', ')} while enjoying ${accommodation} accommodations and ${transportation} transportation. Your adventure is perfectly planned to fit within your ₹${budgetInINR.toLocaleString('en-IN')} budget.`,
-    totalBudget: safetyBudget,
-    days: await generateEnhancedDays(days, city, interests, accommodation, adjustedDailyCost),
+    summary: `A ${days}-day itinerary for ${city} built using real restaurants and attractions from Google Places.`,
+    totalBudget: budget,
+    days: await generateEnhancedDays(days, city, interests, accommodation, Math.floor(budget / days)),
     tips: generateEnhancedTips(city, interests),
     emergencyContacts: generateEnhancedContacts(city)
   };
@@ -378,7 +383,10 @@ async function generateDailySchedule(day: number, city: string, interests: strin
   try {
     // Get real places from Google Places API with timeout
     const places = await getCitySpecificPlaces(city, interests);
-    
+    if (!places.attractions.length || !places.restaurants.length) {
+      throw new Error(`Insufficient Google Places data for ${city}`);
+    }
+
     // Calculate starting index for this day to get different places
     const attractionsPerDay = 4;
     const startIndex = (day - 1) * attractionsPerDay;
@@ -450,42 +458,7 @@ async function generateDailySchedule(day: number, city: string, interests: strin
     
   } catch (error) {
     console.error('Error fetching places:', error);
-    // Fallback to enhanced generic names if API fails
-    const enhancedLandmarks = getEnhancedLandmarks(city, day, totalDays);
-    const enhancedRestaurants = getEnhancedRestaurants(city, day);
-    
-    // Assign enhanced landmarks to time slots
-    timeSlots.forEach((slot, index) => {
-      if (index < 4 && enhancedLandmarks[index]) {
-        const landmark = enhancedLandmarks[index];
-        const duration = Math.random() > 0.5 ? '2 hours' : '1.5 hours';
-        dailyActivities.push(`${slot.start} - ${landmark.name} (${duration}) - ${landmark.location}`);
-      }
-    });
-    
-    // Add day-specific themed activities
-    if (day === 1 && enhancedLandmarks[4]) {
-      dailyActivities.push(`11:00 AM - ${enhancedLandmarks[4].name} (1 hour) - ${enhancedLandmarks[4].location}`);
-    } else if (day === 2 && enhancedLandmarks[5]) {
-      dailyActivities.push(`2:30 PM - ${enhancedLandmarks[5].name} (1.5 hours) - ${enhancedLandmarks[5].location}`);
-    } else if (day === 3 && enhancedLandmarks[6]) {
-      dailyActivities.push(`4:00 PM - ${enhancedLandmarks[6].name} (2 hours) - ${enhancedLandmarks[6].location}`);
-    }
-    
-    // Add meals with enhanced restaurant names
-    const breakfastTime = day === 1 ? '7:30 AM' : day === 2 ? '8:30 AM' : '8:00 AM';
-    const lunchTime = day === 1 ? '12:30 PM' : day === 2 ? '1:30 PM' : '1:00 PM';
-    const dinnerTime = day === 1 ? '7:30 PM' : day === 2 ? '8:00 PM' : '7:00 PM';
-    
-    if (enhancedRestaurants.breakfast) {
-      dailyMeals.push(`${breakfastTime} - Breakfast at ${enhancedRestaurants.breakfast.name} - ${enhancedRestaurants.breakfast.location} (Rating: ${enhancedRestaurants.breakfast.rating}/5)`);
-    }
-    if (enhancedRestaurants.lunch) {
-      dailyMeals.push(`${lunchTime} - Lunch at ${enhancedRestaurants.lunch.name} - ${enhancedRestaurants.lunch.location} (Rating: ${enhancedRestaurants.lunch.rating}/5)`);
-    }
-    if (enhancedRestaurants.dinner) {
-      dailyMeals.push(`${dinnerTime} - Dinner at ${enhancedRestaurants.dinner.name} - ${enhancedRestaurants.dinner.location} (Rating: ${enhancedRestaurants.dinner.rating}/5)`);
-    }
+    throw error;
   }
   
   return {

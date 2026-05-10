@@ -86,10 +86,10 @@ export function ItineraryPlanner() {
   };
 
   const generateItinerary = async () => {
-    if (!formData.city || formData.budget <= 0 || formData.days <= 0) {
+    if (!formData.city || formData.budget <= 0 || formData.days <= 0 || formData.interests.length === 0) {
       toast({
         title: "Validation Error",
-        description: "Please fill in all required fields with valid values.",
+        description: "Please fill in all required fields with valid values, including selecting at least one interest.",
         variant: "destructive"
       });
       return;
@@ -259,7 +259,7 @@ export function ItineraryPlanner() {
 
               {/* Interests */}
               <div className="space-y-3">
-                <Label>Travel Interests (Select all that apply)</Label>
+                <Label>Travel Interests (Select all that apply) *</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {interestOptions.map(interest => (
                     <button
@@ -276,6 +276,9 @@ export function ItineraryPlanner() {
                     </button>
                   ))}
                 </div>
+                {formData.interests.length === 0 && (
+                  <p className="text-xs text-red-500">Please select at least one interest</p>
+                )}
               </div>
 
               {/* Generate Button */}
